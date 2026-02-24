@@ -1,0 +1,316 @@
+:root {
+    --bg-color: #0b0f19;
+    --panel-bg: rgba(20, 25, 40, 0.7);
+    --text-main: #e2e8f0;
+    --text-muted: #94a3b8;
+    --accent-primary: #38bdf8;
+    --accent-secondary: #f43f5e;
+    --accent-success: #10b981;
+    --canvas-grid: rgba(255, 255, 255, 0.05);
+    --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Outfit', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-image:
+        radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.08), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(244, 63, 94, 0.08), transparent 25%);
+}
+
+#app {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    height: 100vh;
+}
+
+.header {
+    text-align: center;
+}
+
+.header h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(to right, var(--accent-primary), #60a5fa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+}
+
+.main-content {
+    display: flex;
+    gap: 2rem;
+    flex: 1;
+    min-height: 0;
+    /* Important for flex child with scrolling content or canvas */
+}
+
+/* Controls Panel */
+.controls-panel {
+    flex: 0 0 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.card {
+    background: var(--panel-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.card h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: #fff;
+}
+
+/* Buttons & Inputs */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+.primary-btn {
+    background: var(--accent-primary);
+    color: #0b0f19;
+}
+
+.primary-btn:hover:not(:disabled) {
+    background: #7dd3fc;
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+}
+
+.secondary-btn {
+    background: transparent;
+    border: 1px solid var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.secondary-btn:hover:not(:disabled) {
+    background: rgba(56, 189, 248, 0.1);
+}
+
+.action-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    flex: 1;
+}
+
+.action-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.file-input-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+input[type="file"] {
+    display: none;
+}
+
+#file-name {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    word-break: break-all;
+}
+
+.mic-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.status-indicator {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.status-indicator.active {
+    color: var(--accent-success);
+    text-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+}
+
+.playback-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.progress-bar-container {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent-primary);
+    transition: width 0.1s linear;
+}
+
+#time-display {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Visualization Panel */
+.visualization-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+}
+
+.canvas-container {
+    flex: 1;
+    position: relative;
+    display: flex;
+}
+
+.pitch-labels {
+    width: 50px;
+    background: rgba(0, 0, 0, 0.3);
+    border-right: 1px solid var(--glass-border);
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+}
+
+.pitch-label {
+    position: absolute;
+    width: 100%;
+    text-align: right;
+    padding-right: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    transform: translateY(-50%);
+    user-select: none;
+}
+
+canvas {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+    left: 20%;
+    /* Fixed playhead position */
+    z-index: 5;
+    pointer-events: none;
+}
+
+.legend {
+    padding: 1rem;
+    border-top: 1px solid var(--glass-border);
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.color-box {
+    width: 16px;
+    height: 4px;
+    border-radius: 2px;
+}
+
+.color-box.original {
+    background: var(--accent-primary);
+    box-shadow: 0 0 8px var(--accent-primary);
+}
+
+.color-box.user {
+    background: var(--accent-secondary);
+    box-shadow: 0 0 8px var(--accent-secondary);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .main-content {
+        flex-direction: column;
+    }
+
+    .controls-panel {
+        flex: none;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .card {
+        flex: 1;
+        min-width: 250px;
+    }
+
+    .visualization-panel {
+        min-height: 400px;
+    }
+}

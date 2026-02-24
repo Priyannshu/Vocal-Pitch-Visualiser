@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vocal Pitch Visualizer</title>
+    <link rel="stylesheet" href="./src/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <h1>Vocal Pitch Visualizer</h1>
+        <p class="subtitle">Sing along and match the pitch!</p>
+      </header>
+
+      <main class="main-content">
+        <div class="controls-panel">
+          <div class="upload-section card">
+            <h2>1. Load Original Audio</h2>
+            <div class="file-input-wrapper">
+              <input type="file" id="audio-upload" accept="audio/mpeg, audio/wav, audio/ogg" />
+              <label for="audio-upload" class="btn primary-btn">Select Track</label>
+              <span id="file-name">No file selected</span>
+            </div>
+          </div>
+
+          <div class="mic-section card">
+            <h2>2. Microphone</h2>
+            <button id="btn-mic" class="btn secondary-btn">Enable Mic</button>
+            <span id="mic-status" class="status-indicator">● Offline</span>
+          </div>
+
+          <div class="playback-section card">
+            <h2>3. Playback</h2>
+            <div class="playback-controls">
+              <button id="btn-play" class="btn action-btn" disabled>Play</button>
+              <button id="btn-pause" class="btn action-btn" disabled>Pause</button>
+              <button id="btn-stop" class="btn action-btn" disabled>Stop</button>
+            </div>
+            <div class="progress-bar-container">
+              <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <span id="time-display">0:00 / 0:00</span>
+          </div>
+        </div>
+
+        <div class="visualization-panel">
+          <div class="canvas-container">
+            <div class="pitch-labels" id="pitch-labels">
+              <!-- Note labels populated by JS -->
+            </div>
+            <canvas id="pitch-canvas"></canvas>
+            <div class="playhead"></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="color-box original"></span> Original Pitch</span>
+            <span class="legend-item"><span class="color-box user"></span> Your Pitch</span>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
