@@ -13,19 +13,6 @@ Responsive Canvas — The visualization automatically resizes with the browser w
 Zero UI Framework Dependency — Pure vanilla JS, HTML, and CSS.
 
 
-🗂️ Project Structure
-PitchVisualizer/
-├── index.html              # App shell — layout, controls UI, canvas mount
-├── src/
-│   ├── main.js             # Entry point — wires all modules together
-│   ├── audioManager.js     # Web Audio API: file loading, playback, seek, mic capture
-│   ├── pitchDetector.js    # Custom YIN-MPM pitch detection engine
-│   ├── canvasRenderer.js   # Canvas 2D: note blocks, glides, user pitch overlay
-│   └── style.css           # Dark theme, Outfit font, glassmorphism cards
-├── package.json            # npm scripts & dependencies
-├── package-lock.json       # Locked dependency tree (lockfileVersion 3)
-├── .gitignore              # Ignores node_modules, dist, editor files
-└── vite.config.js          # Vite dev/build configuration
 
 🚀 Getting Started
 Prerequisites
