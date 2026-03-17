@@ -1,5 +1,5 @@
 🎵 Vocal Pitch Visualizer
-A real-time, browser-based tool that lets you sing along to any audio track and visually compare your pitch against the original. Load a file, enable your microphone, and watch your voice plotted live against the song's pitch curve — all with no backend, no frameworks, and no internet connection required after load.
+A real-time, browser-based tool that lets you sing along to any audio track and visually compare your pitch against the original. Load a pure-vocal file, enable your microphone, and watch your voice plotted live against the song's pitch curve — all with no backend, no frameworks, and no internet connection required after load.
 
 ✨ Features
 
