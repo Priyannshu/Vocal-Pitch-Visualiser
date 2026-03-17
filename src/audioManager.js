@@ -96,6 +96,31 @@ export class AudioManager {
         cancelAnimationFrame(this.animationFrame);
     }
 
+    /**
+     * Seek to a specific time in seconds.
+     */
+    seek(time) {
+        if (!this.buffer) return;
+        const clampedTime = Math.max(0, Math.min(time, this.buffer.duration));
+
+        if (this.state.isPlaying) {
+            // Stop current playback, then restart from the new position
+            if (this.source) {
+                this.source.onended = null; // prevent stop() trigger
+                this.source.stop();
+            }
+            this.state.isPlaying = false;
+            cancelAnimationFrame(this.animationFrame);
+            this.pauseTime = clampedTime;
+            this.play();
+        } else {
+            // Just update the pause position
+            this.pauseTime = clampedTime;
+            this.state.currentTime = clampedTime;
+            this.updateState();
+        }
+    }
+
     updateProgressLoop() {
         if (!this.state.isPlaying) return;
 
@@ -124,9 +149,9 @@ export class AudioManager {
             this.initContext();
             this.micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    echoCancellation: false,
-                    autoGainControl: false,
-                    noiseSuppression: false,
+                    echoCancellation: true,
+                    autoGainControl: true,
+                    noiseSuppression: true,
                     latency: 0
                 }
             });
@@ -134,8 +159,10 @@ export class AudioManager {
             this.micSource = this.audioContext.createMediaStreamSource(this.micStream);
 
             // Use ScriptProcessorNode for wide compatibility and direct access to audio buffer arrays for pitch rendering
-            // 2048 buffer size gives decent time resolution
-            this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+            // 1024 buffer size perfectly matches our PitchDetector frame size
+            this.scriptProcessor = this.audioContext.createScriptProcessor(1024, 1, 1);
+
+            this.micStartTime = this.audioContext.currentTime;
 
             this.scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
                 const inputBuffer = audioProcessingEvent.inputBuffer;
@@ -143,8 +170,17 @@ export class AudioManager {
                 // CRITICAL: copy the buffer — ScriptProcessor reuses the same Float32Array
                 const dataCopy = new Float32Array(inputData.length);
                 dataCopy.set(inputData);
+                
+                if (!this._audioProcessLog) {
+                    console.log(`[AudioManager] First mic buffer received! Length: ${dataCopy.length}`);
+                    this._audioProcessLog = true;
+                }
+
                 if (this.onMicAudioProcess) {
-                    this.onMicAudioProcess(dataCopy);
+                    // Use track time if playing, otherwise use continuous mic time
+                    const micActiveTime = this.audioContext.currentTime - this.micStartTime;
+                    const timeToReport = this.state.isPlaying ? this.state.currentTime : micActiveTime;
+                    this.onMicAudioProcess(dataCopy, timeToReport);
                 }
             };
 

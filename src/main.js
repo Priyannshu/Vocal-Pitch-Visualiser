@@ -19,6 +19,7 @@ class App {
         const btnPlay = document.getElementById('btn-play');
         const btnPause = document.getElementById('btn-pause');
         const btnStop = document.getElementById('btn-stop');
+        const progressContainer = document.querySelector('.progress-bar-container');
 
         uploadInput.addEventListener('change', (e) => this.handleFileUpload(e));
         btnMic.addEventListener('click', () => this.toggleMic());
@@ -26,6 +27,35 @@ class App {
         btnPlay.addEventListener('click', () => this.audioManager.play());
         btnPause.addEventListener('click', () => this.audioManager.pause());
         btnStop.addEventListener('click', () => this.audioManager.stop());
+
+        // --- Progress bar seek (click + drag) ---
+        if (progressContainer) {
+            let isDragging = false;
+
+            const seekFromEvent = (e) => {
+                const rect = progressContainer.getBoundingClientRect();
+                const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                const seekTime = ratio * this.audioManager.state.duration;
+                this.audioManager.seek(seekTime);
+            };
+
+            progressContainer.addEventListener('mousedown', (e) => {
+                if (this.audioManager.state.duration > 0) {
+                    isDragging = true;
+                    seekFromEvent(e);
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    seekFromEvent(e);
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+        }
 
         // Listen for state changes from audio manager
         this.audioManager.onStateChange = (state) => this.updateUIState(state);
@@ -35,10 +65,29 @@ class App {
             this.canvasRenderer.setOriginalPitchData(pitchData);
         };
 
-        // Receive live user pitch
-        this.audioManager.onMicAudioProcess = (audioBuffer) => {
+        // Receive live user pitch — route through full-quality pipeline
+        let lastLog = 0;
+        this.audioManager.onMicAudioProcess = (audioBuffer, micTime) => {
             const pitch = this.pitchProcessor.detectPitch(audioBuffer);
-            this.canvasRenderer.addLivePitch(pitch);
+            
+            // If the backing track isn't playing, drive the playhead using the mic's clock
+            if (!this.audioManager.state.isPlaying && micTime !== undefined) {
+                this.canvasRenderer.setCurrentTime(micTime);
+            }
+
+            if (pitch !== null) {
+                const currentTime = this.canvasRenderer.currentTime;
+                
+                const now = performance.now();
+                if (now - lastLog > 1000) {
+                    console.log(`[Main] Detected Mic Pitch: ${pitch.toFixed(1)} Hz at time: ${currentTime.toFixed(2)}s`);
+                    lastLog = now;
+                }
+
+                this.canvasRenderer.addLivePitch(pitch);
+                // Feed into the adaptive segmentation pipeline
+                this.pitchProcessor.addLivePitchSample(currentTime, pitch);
+            }
         };
     }
 

@@ -1,0 +1,28 @@
+# Vocal Pitch Visualizer — Node.js Dependencies
+# Install all dependencies with: npm install
+#
+# This is a JavaScript/Node.js project.
+# The canonical dependency file is package.json.
+# This file is provided for quick reference only.
+
+# ── Runtime Dependencies ────────────────────────────────────────────────────────
+
+pitchfinder@^2.3.4
+# Pitch detection algorithms (used as a reference/utility alongside the
+# custom YIN-MPM detector implemented in src/pitchDetector.js)
+
+# ── Development Dependencies ────────────────────────────────────────────────────
+
+vite@^7.3.1
+# Fast dev server and production bundler (ES module native)
+
+# ── Runtime Environment ─────────────────────────────────────────────────────────
+
+# Node.js  >= 18.0.0   (for Vite 7 compatibility)
+# npm      >= 9.0.0
+
+# ── Browser Requirements ────────────────────────────────────────────────────────
+
+# Web Audio API support (Chrome 66+, Edge 79+, Firefox 76+)
+# Canvas 2D API support (all modern browsers)
+# getUserMedia / MediaDevices API (for microphone input)

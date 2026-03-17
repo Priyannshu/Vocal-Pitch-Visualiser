@@ -99,8 +99,10 @@ function normalizeAmplitude(frame, targetRMS = 0.1) {
     if (rms < 1e-6) return frame; // silence, don't amplify noise
 
     const gain = targetRMS / rms;
-    // Cap gain to avoid amplifying noise in very quiet frames
-    const cappedGain = Math.min(gain, 20);
+    // Cap gain to avoid amplifying pure noise in very quiet frames
+    // Increased from 20 to 200 because laptop mics can be extremely quiet (RMS ~0.005)
+    // but still contain valid pitched vocals.
+    const cappedGain = Math.min(gain, 200);
 
     const normalized = new Float32Array(frame.length);
     for (let i = 0; i < frame.length; i++) {
@@ -141,12 +143,16 @@ function computeNSDF(frame) {
 
 /**
  * Find key maxima in the NSDF (positive peaks after zero-crossings).
+ * We enforce a minTau (max freq ~3000Hz) to ignore high-frequency noise peaks.
  */
-function findNSDFPeaks(nsdf) {
+function findNSDFPeaks(nsdf, sampleRate) {
     const peaks = [];
     let positiveRegion = false;
     let currentPeakTau = 0;
     let currentPeakVal = -Infinity;
+
+    // Reject extremely high frequencies (> 3000 Hz) typical of static noise
+    const minTau = Math.floor(sampleRate / 3000);
 
     for (let tau = 1; tau < nsdf.length; tau++) {
         if (nsdf[tau] > 0) {
@@ -159,13 +165,16 @@ function findNSDFPeaks(nsdf) {
                 currentPeakVal = nsdf[tau];
             }
         } else if (positiveRegion) {
-            peaks.push({ tau: currentPeakTau, value: currentPeakVal });
+            // Only consider the peak if the lag (tau) represents a valid vocal frequency < 3000Hz
+            if (currentPeakTau >= minTau) {
+                peaks.push({ tau: currentPeakTau, value: currentPeakVal });
+            }
             positiveRegion = false;
             currentPeakVal = -Infinity;
         }
     }
 
-    if (positiveRegion && currentPeakVal > 0) {
+    if (positiveRegion && currentPeakVal > 0 && currentPeakTau >= minTau) {
         peaks.push({ tau: currentPeakTau, value: currentPeakVal });
     }
 
@@ -210,7 +219,8 @@ function detectPitchFromFrame(frame, sampleRate, clarityThreshold = 0.2) {
     const rawRMS = computeRMS(frame);
 
     // Very quiet frame — true silence
-    if (rawRMS < 0.005) {
+    // Lowered from 0.005 to 0.0005 to accommodate quiet laptop mics
+    if (rawRMS < 0.0005) {
         return { frequency: null, clarity: 0, confident: false, rms: rawRMS };
     }
 
@@ -223,8 +233,8 @@ function detectPitchFromFrame(frame, sampleRate, clarityThreshold = 0.2) {
     // 3. Compute NSDF
     const nsdf = computeNSDF(windowed);
 
-    // 4. Find key maxima
-    const peaks = findNSDFPeaks(nsdf);
+    // 4. Find key maxima (filtering out high-frequency noise)
+    const peaks = findNSDFPeaks(nsdf, sampleRate);
 
     if (peaks.length === 0) {
         return { frequency: null, clarity: 0, confident: false, rms: rawRMS };
@@ -238,12 +248,21 @@ function detectPitchFromFrame(frame, sampleRate, clarityThreshold = 0.2) {
 
     const kThreshold = 0.5; // Lowered from 0.8 → 0.5 for sensitivity
     let selectedPeak = null;
+    let maxPeak = null;
 
     for (const p of peaks) {
-        if (p.value >= kThreshold * globalMax) {
-            selectedPeak = p;
-            break;
+        if (!maxPeak || p.value > maxPeak.value) {
+            maxPeak = p;
         }
+        if (p.value >= kThreshold * globalMax && !selectedPeak) {
+            selectedPeak = p;
+        }
+    }
+
+    if (!selectedPeak && maxPeak) {
+        // Fallback: if somehow no peak crossed the threshold (floating point issues, etc)
+        // just take the absolute maximum peak.
+        selectedPeak = maxPeak;
     }
 
     if (!selectedPeak) {
@@ -261,8 +280,8 @@ function detectPitchFromFrame(frame, sampleRate, clarityThreshold = 0.2) {
     const frequency = sampleRate / interpolated.tau;
     const clarity = Math.max(0, Math.min(1, interpolated.value));
 
-    // Reject unreasonable frequencies
-    if (frequency < 50 || frequency > 2000) {
+    // Reject completely unreasonable frequencies (sub-bass or piercing treble)
+    if (frequency < 50 || frequency > 3000) {
         return { frequency: null, clarity: clarity, confident: false, rms: rawRMS };
     }
 
@@ -293,7 +312,7 @@ export class PitchDetector {
         this.sampleRate = sampleRate;
         this.clarityThreshold = options.clarityThreshold ?? 0.2;
         this.bypassSmoothing = options.bypassSmoothing ?? false;
-        this.medianFilter = new MedianFilter(options.medianWindowSize ?? 5);
+        this.medianFilter = new MedianFilter(options.medianWindowSize ?? 2);
         this.circularBuffer = new CircularBuffer(FRAME_SIZE);
     }
 
