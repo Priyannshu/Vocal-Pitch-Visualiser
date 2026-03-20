@@ -3,65 +3,186 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vocal Pitch Visualizer</title>
+    <title>VOCAL — Pitch Visualiser</title>
+    <meta name="description" content="VOCAL pitch visualiser — sing along with a reference track and measure your pitch accuracy in real time." />
     <link rel="stylesheet" href="./src/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
   <body>
-    <div id="app">
-      <header class="header">
-        <h1>Vocal Pitch Visualizer</h1>
-        <p class="subtitle">Sing along and match the pitch!</p>
-      </header>
+    <div id="app-shell">
 
-      <main class="main-content">
-        <div class="controls-panel">
-          <div class="upload-section card">
-            <h2>1. Load Original Audio</h2>
-            <div class="file-input-wrapper">
-              <input type="file" id="audio-upload" accept="audio/mpeg, audio/wav, audio/ogg" />
-              <label for="audio-upload" class="btn primary-btn">Select Track</label>
-              <span id="file-name">No file selected</span>
-            </div>
+      <!-- ═══ Navbar ═══ -->
+      <nav id="navbar">
+        <div class="nav-left">
+          <span class="brand-logo">VOCAL</span>
+        </div>
+        <div class="nav-right">
+          <span id="genre-pill" class="genre-pill">Bollywood</span>
+          <div id="user-avatar" class="avatar-circle"></div>
+        </div>
+      </nav>
+
+      <!-- ═══ Top Bar ═══ -->
+      <div id="top-bar">
+        <span class="app-label">VOCAL — PITCH VISUALISER</span>
+        <div id="match-score-pill" class="match-score-pill">
+          <span class="pill-label">Match score</span>
+          <span id="match-score-value" class="pill-value">—</span>
+        </div>
+      </div>
+
+      <!-- ═══ Upload Area (shown before track is loaded) ═══ -->
+      <div id="upload-area" class="upload-area">
+
+        <!-- Option A — YouTube Link -->
+        <div class="upload-option">
+          <div class="option-header">
+            <span class="option-icon">🔗</span>
+            <span class="option-title">Paste a YouTube link</span>
           </div>
-
-          <div class="mic-section card">
-            <h2>2. Microphone</h2>
-            <button id="btn-mic" class="btn secondary-btn">Enable Mic</button>
-            <span id="mic-status" class="status-indicator">● Offline</span>
+          <div class="yt-input-row">
+            <input type="text" id="yt-url-input" class="yt-input" placeholder="https://www.youtube.com/watch?v=..." />
+            <button id="btn-yt-submit" class="ctrl-btn yt-submit-btn">Separate</button>
           </div>
-
-          <div class="playback-section card">
-            <h2>3. Playback</h2>
-            <div class="playback-controls">
-              <button id="btn-play" class="btn action-btn" disabled>Play</button>
-              <button id="btn-pause" class="btn action-btn" disabled>Pause</button>
-              <button id="btn-stop" class="btn action-btn" disabled>Stop</button>
-            </div>
-            <div class="progress-bar-container">
-              <div id="progress-bar" class="progress-bar"></div>
-            </div>
-            <span id="time-display">0:00 / 0:00</span>
+          <div id="yt-status" class="yt-status hidden">
+            <span class="spinner"></span>
+            <span id="yt-status-text">Downloading and separating...</span>
           </div>
         </div>
 
-        <div class="visualization-panel">
-          <div class="canvas-container">
-            <div class="pitch-labels" id="pitch-labels">
-              <!-- Note labels populated by JS -->
-            </div>
-            <canvas id="pitch-canvas"></canvas>
-            <div class="playhead"></div>
+        <!-- Divider -->
+        <div class="upload-divider">
+          <span class="divider-line"></span>
+          <span class="divider-text">or</span>
+          <span class="divider-line"></span>
+        </div>
+
+        <!-- Option B — Upload Both Files Directly -->
+        <div class="upload-option">
+          <div class="option-header">
+            <span class="option-icon">📁</span>
+            <span class="option-title">Upload both files directly</span>
           </div>
-          <div class="legend">
-            <span class="legend-item"><span class="color-box original"></span> Original Pitch</span>
-            <span class="legend-item"><span class="color-box user"></span> Your Pitch</span>
+          <div class="dual-upload-row">
+            <label class="file-upload-label" for="upload-vocals">
+              <span class="file-upload-icon">🎤</span>
+              <span id="upload-vocals-name" class="file-upload-text">Upload vocals</span>
+              <input type="file" id="upload-vocals" accept="audio/mpeg, audio/wav, audio/mp4, audio/ogg, audio/x-m4a, .m4a" />
+            </label>
+            <label class="file-upload-label" for="upload-instrumental">
+              <span class="file-upload-icon">🎵</span>
+              <span id="upload-instrumental-name" class="file-upload-text">Upload instrumental</span>
+              <input type="file" id="upload-instrumental" accept="audio/mpeg, audio/wav, audio/mp4, audio/ogg, audio/x-m4a, .m4a" />
+            </label>
+          </div>
+          <div id="direct-upload-status" class="direct-upload-status hidden">
+            <span id="direct-upload-status-text"></span>
           </div>
         </div>
-      </main>
+
+      </div>
+
+      <!-- ═══ Song Card (compact, shown after track loads) ═══ -->
+      <div id="song-card" class="song-card hidden">
+        <div class="song-thumb">♫</div>
+        <div class="song-meta">
+          <span id="song-title" class="song-title">No track loaded</span>
+          <span id="song-artist" class="song-artist"></span>
+          <span id="song-album" class="song-album"></span>
+        </div>
+        <div class="song-right">
+          <span id="song-duration" class="song-duration"></span>
+          <span id="song-status" class="status-pill">Ready</span>
+        </div>
+      </div>
+
+      <!-- ═══ Stat Cards (Post-recording only) ═══ -->
+      <div id="stat-cards" class="stat-cards hidden">
+        <div class="stat-card">
+          <span class="stat-label">Match score</span>
+          <span id="stat-match-score" class="stat-value orange">—</span>
+          <span class="stat-sub">after full run</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Best section</span>
+          <span id="stat-best-section-value" class="stat-value green">—</span>
+          <span id="stat-best-section-name" class="stat-sub"></span>
+        </div>
+      </div>
+
+      <!-- ═══ Section Heading (Review mode only) ═══ -->
+      <div id="canvas-section-heading" class="section-heading hidden">PITCH CANVAS — REVIEW</div>
+
+      <!-- ═══ Pitch Canvas ═══ -->
+      <div id="canvas-container" class="canvas-container">
+        <canvas id="pitch-canvas"></canvas>
+      </div>
+
+      <!-- ═══ Section Label Strip (Review mode only) ═══ -->
+      <div id="section-label-strip" class="section-label-strip hidden">
+        <span class="section-cell">Verse 1</span>
+        <span class="section-cell">Chorus</span>
+        <span class="section-cell">Verse 2</span>
+        <span class="section-cell">Bridge</span>
+        <span class="section-cell">Outro</span>
+      </div>
+
+      <!-- ═══ Legend ═══ -->
+      <div id="legend" class="legend">
+        <div class="legend-item">
+          <span class="legend-line white"></span>
+          <span class="legend-text">Reference singer</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-line orange"></span>
+          <span class="legend-text">Your voice</span>
+        </div>
+      </div>
+
+      <!-- ═══ Controls Row ═══ -->
+      <div id="controls-row" class="controls-row">
+        <button id="btn-record" class="ctrl-btn record-btn" disabled>● Record</button>
+        <button id="btn-playback" class="ctrl-btn playback-btn" disabled>▶ Play back</button>
+      </div>
+
+      <!-- ═══ Timeline Scrubber ═══ -->
+      <div id="timeline-scrubber" class="timeline-scrubber">
+        <div class="scrubber-track">
+          <div id="scrubber-fill" class="scrubber-fill"></div>
+          <div id="scrubber-dot" class="scrubber-dot"></div>
+        </div>
+        <div class="time-labels">
+          <span id="time-start">0:00</span>
+          <span id="time-current">0:00</span>
+          <span id="time-total">0:00</span>
+        </div>
+      </div>
+
+      <!-- ═══ Divider (Post-recording) ═══ -->
+      <hr id="review-divider" class="review-divider hidden" />
+
+      <!-- ═══ Accuracy Over Time Graph (Post-recording only) ═══ -->
+      <div id="accuracy-container" class="accuracy-container hidden">
+        <div class="accuracy-header">
+          <div class="accuracy-pills">
+            <span id="accuracy-avg-pill" class="accuracy-pill orange">Avg —</span>
+            <span id="accuracy-peak-pill" class="accuracy-pill green">Peak —</span>
+          </div>
+        </div>
+        <canvas id="accuracy-canvas"></canvas>
+        <div id="accuracy-section-labels" class="section-label-strip">
+          <span class="section-cell">Verse 1</span>
+          <span class="section-cell">Chorus</span>
+          <span class="section-cell">Verse 2</span>
+          <span class="section-cell">Bridge</span>
+          <span class="section-cell">Outro</span>
+        </div>
+      </div>
+
     </div>
+
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

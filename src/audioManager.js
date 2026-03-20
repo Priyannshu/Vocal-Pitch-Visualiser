@@ -1,15 +1,36 @@
+/**
+ * AudioManager — VOCAL Audio Processing Engine
+ *
+ * Manages two separate audio tracks:
+ *   - vocalsBuffer    → decoded PCM of the singer's isolated vocals (for pitch analysis only, NOT played back)
+ *   - instrumentalBuffer → decoded PCM of the backing instrumental (played during recording)
+ *
+ * Microphone capture uses AudioWorkletNode (spec requirement) with fallback
+ * to ScriptProcessorNode for older browsers.
+ *
+ * The instrumental plays through speakers during recording.
+ * The vocals are analysed offline by PitchProcessor.
+ */
+
 export class AudioManager {
     constructor() {
         this.audioContext = null;
-        this.buffer = null;
+
+        // Two distinct audio buffers
+        this.vocalsBuffer = null;
+        this.instrumentalBuffer = null;
+
+        // Playback source (instrumental only)
         this.source = null;
 
-        // Sub-system for mic recording
+        // Mic subsystem
         this.micStream = null;
         this.micSource = null;
-        this.scriptProcessor = null;
+        this.workletNode = null;
+        this.scriptProcessor = null; // fallback
+        this.useWorklet = false;
 
-        // State state
+        // State
         this.state = {
             isReady: false,
             isPlaying: false,
@@ -17,13 +38,17 @@ export class AudioManager {
             duration: 0
         };
 
-        this.onStateChange = () => { };
-        this.onMicAudioProcess = () => { };
+        this.onStateChange = () => {};
+        this.onMicAudioProcess = () => {};
 
         this.startTime = 0;
         this.pauseTime = 0;
         this.animationFrame = null;
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Context
+    // ═══════════════════════════════════════════════════════════
 
     initContext() {
         if (!this.audioContext) {
@@ -34,31 +59,75 @@ export class AudioManager {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Loading — supports both File objects and ArrayBuffers
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Load vocals audio from a File or ArrayBuffer.
+     * Returns the decoded AudioBuffer for offline pitch analysis.
+     */
+    async loadVocals(source) {
+        this.initContext();
+        const arrayBuffer = source instanceof File ? await source.arrayBuffer() : source;
+        this.vocalsBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+        // Duration is based on whichever is longer (usually the same)
+        this._updateDuration();
+        return this.vocalsBuffer;
+    }
+
+    /**
+     * Load instrumental audio from a File or ArrayBuffer.
+     * This is the track that plays through speakers during recording.
+     */
+    async loadInstrumental(source) {
+        this.initContext();
+        const arrayBuffer = source instanceof File ? await source.arrayBuffer() : source;
+        this.instrumentalBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+        this._updateDuration();
+        return this.instrumentalBuffer;
+    }
+
+    /**
+     * Legacy: load a single file as both vocals + instrumental (for backward compat).
+     * Returns the decoded AudioBuffer.
+     */
     async loadFile(file) {
         this.initContext();
-
         const arrayBuffer = await file.arrayBuffer();
-        this.buffer = await this.audioContext.decodeAudioData(arrayBuffer);
+        const buffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-        this.state.isReady = true;
-        this.state.duration = this.buffer.duration;
+        this.vocalsBuffer = buffer;
+        this.instrumentalBuffer = buffer;
+        this._updateDuration();
+        return buffer;
+    }
+
+    _updateDuration() {
+        const vocDur = this.vocalsBuffer ? this.vocalsBuffer.duration : 0;
+        const instDur = this.instrumentalBuffer ? this.instrumentalBuffer.duration : 0;
+        this.state.duration = Math.max(vocDur, instDur);
+        this.state.isReady = this.vocalsBuffer !== null && this.instrumentalBuffer !== null;
         this.state.currentTime = 0;
         this.pauseTime = 0;
         this.updateState();
-
-        return this.buffer;
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Playback (instrumental only → speakers)
+    // ═══════════════════════════════════════════════════════════
+
     play() {
-        if (!this.buffer || this.state.isPlaying) return;
+        if (!this.instrumentalBuffer || this.state.isPlaying) return;
         this.initContext();
 
         this.source = this.audioContext.createBufferSource();
-        this.source.buffer = this.buffer;
+        this.source.buffer = this.instrumentalBuffer;
         this.source.connect(this.audioContext.destination);
 
-        // Calculate offest based on pauses
-        let offset = this.pauseTime;
+        const offset = this.pauseTime;
         this.source.start(0, offset);
 
         this.startTime = this.audioContext.currentTime - offset;
@@ -66,7 +135,6 @@ export class AudioManager {
         this.updateState();
 
         this.source.onended = () => {
-            // Only reset if it naturally ended, not from user pause
             if (this.state.isPlaying) {
                 this.stop();
             }
@@ -96,17 +164,14 @@ export class AudioManager {
         cancelAnimationFrame(this.animationFrame);
     }
 
-    /**
-     * Seek to a specific time in seconds.
-     */
     seek(time) {
-        if (!this.buffer) return;
-        const clampedTime = Math.max(0, Math.min(time, this.buffer.duration));
+        const buf = this.instrumentalBuffer;
+        if (!buf) return;
+        const clampedTime = Math.max(0, Math.min(time, buf.duration));
 
         if (this.state.isPlaying) {
-            // Stop current playback, then restart from the new position
             if (this.source) {
-                this.source.onended = null; // prevent stop() trigger
+                this.source.onended = null;
                 this.source.stop();
             }
             this.state.isPlaying = false;
@@ -114,7 +179,6 @@ export class AudioManager {
             this.pauseTime = clampedTime;
             this.play();
         } else {
-            // Just update the pause position
             this.pauseTime = clampedTime;
             this.state.currentTime = clampedTime;
             this.updateState();
@@ -123,10 +187,8 @@ export class AudioManager {
 
     updateProgressLoop() {
         if (!this.state.isPlaying) return;
-
         this.state.currentTime = this.audioContext.currentTime - this.startTime;
         this.updateState();
-
         this.animationFrame = requestAnimationFrame(() => this.updateProgressLoop());
     }
 
@@ -134,7 +196,10 @@ export class AudioManager {
         this.onStateChange(this.state);
     }
 
-    // --- Microphone Handling ---
+    // ═══════════════════════════════════════════════════════════
+    //  Microphone — AudioWorkletNode (preferred) + SPNode fallback
+    // ═══════════════════════════════════════════════════════════
+
     async toggleMic() {
         if (this.micStream) {
             this.disableMic();
@@ -147,6 +212,7 @@ export class AudioManager {
     async enableMic() {
         try {
             this.initContext();
+
             this.micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
@@ -157,46 +223,61 @@ export class AudioManager {
             });
 
             this.micSource = this.audioContext.createMediaStreamSource(this.micStream);
-
-            // Use ScriptProcessorNode for wide compatibility and direct access to audio buffer arrays for pitch rendering
-            // 1024 buffer size perfectly matches our PitchDetector frame size
-            this.scriptProcessor = this.audioContext.createScriptProcessor(1024, 1, 1);
-
             this.micStartTime = this.audioContext.currentTime;
 
-            this.scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-                const inputBuffer = audioProcessingEvent.inputBuffer;
-                const inputData = inputBuffer.getChannelData(0);
-                // CRITICAL: copy the buffer — ScriptProcessor reuses the same Float32Array
-                const dataCopy = new Float32Array(inputData.length);
-                dataCopy.set(inputData);
-                
-                if (!this._audioProcessLog) {
-                    console.log(`[AudioManager] First mic buffer received! Length: ${dataCopy.length}`);
-                    this._audioProcessLog = true;
-                }
+            // Try AudioWorkletNode first (spec requirement)
+            try {
+                await this.audioContext.audioWorklet.addModule('/pitch-worklet.js');
+                this.workletNode = new AudioWorkletNode(this.audioContext, 'pitch-worklet-processor');
+                this.useWorklet = true;
 
-                if (this.onMicAudioProcess) {
-                    // Use track time if playing, otherwise use continuous mic time
+                this.workletNode.port.onmessage = (event) => {
+                    if (event.data.type === 'audio-buffer') {
+                        const buffer = event.data.buffer;
+                        const micActiveTime = this.audioContext.currentTime - this.micStartTime;
+                        const timeToReport = this.state.isPlaying ? this.state.currentTime : micActiveTime;
+                        this.onMicAudioProcess(buffer, timeToReport);
+                    }
+                };
+
+                this.micSource.connect(this.workletNode);
+                // Connect to destination to keep the graph alive (silent output)
+                this.workletNode.connect(this.audioContext.destination);
+
+                console.log('[AudioManager] Using AudioWorkletNode for mic capture');
+            } catch (workletError) {
+                // Fallback to ScriptProcessorNode
+                console.warn('[AudioManager] AudioWorklet not available, falling back to ScriptProcessorNode:', workletError);
+                this.useWorklet = false;
+
+                this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+
+                this.scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
+                    const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
+                    const dataCopy = new Float32Array(inputData.length);
+                    dataCopy.set(inputData);
+
                     const micActiveTime = this.audioContext.currentTime - this.micStartTime;
                     const timeToReport = this.state.isPlaying ? this.state.currentTime : micActiveTime;
                     this.onMicAudioProcess(dataCopy, timeToReport);
-                }
-            };
+                };
 
-            // Connect to graph
-            this.micSource.connect(this.scriptProcessor);
-            this.scriptProcessor.connect(this.audioContext.destination);
+                this.micSource.connect(this.scriptProcessor);
+                this.scriptProcessor.connect(this.audioContext.destination);
+            }
 
             return true;
         } catch (err) {
             console.error('Error enabling mic:', err);
-            // In a real app we'd trigger a UI toast
             return false;
         }
     }
 
     disableMic() {
+        if (this.workletNode) {
+            this.workletNode.disconnect();
+            this.workletNode = null;
+        }
         if (this.scriptProcessor) {
             this.scriptProcessor.disconnect();
             this.scriptProcessor = null;
@@ -209,5 +290,6 @@ export class AudioManager {
             this.micStream.getTracks().forEach(track => track.stop());
             this.micStream = null;
         }
+        this.useWorklet = false;
     }
 }

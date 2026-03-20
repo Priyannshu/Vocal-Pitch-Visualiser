@@ -1,151 +1,150 @@
-import { YIN } from 'pitchfinder';
-import { PitchDetector } from './pitchDetector.js';
+/**
+ * PitchProcessor — VOCAL Audio Processing Engine
+ *
+ * Uses `pitchy` (McLeod Pitch Method) for both offline singer analysis
+ * and real-time microphone pitch detection.
+ *
+ * Key parameters (from spec):
+ *   Buffer size:  2048 samples
+ *   Hop size:     512 samples
+ *   Sample rate:  44100 Hz (or actual AudioContext rate)
+ *   Clarity:      > 0.9 for confident detection
+ *   Freq range:   80 Hz – 1200 Hz
+ *
+ * Frequency → Canvas mapping:
+ *   MIDI note = 12 * log2(freq / 440) + 69
+ *   Y position = canvasHeight - ((midi - 60) / 12) * canvasHeight
+ */
+
+import { PitchDetector } from 'pitchy';
+
+// ── Constants ───────────────────────────────────────────────────────────────────
+
+const BUFFER_SIZE = 2048;
+const HOP_SIZE = 512;
+const DEFAULT_SAMPLE_RATE = 44100;
+const CLARITY_THRESHOLD = 0.9;
+const MIN_FREQ = 80;
+const MAX_FREQ = 1200;
 
 export class PitchProcessor {
     constructor() {
-        this.sampleRate = 44100;
+        this.sampleRate = DEFAULT_SAMPLE_RATE;
 
-        this.offlineDetector = YIN({
-            sampleRate: this.sampleRate,
-            threshold: 0.1
-        });
-
-        // High-quality mic detector using our custom NSDF-based PitchDetector
-        this.micPitchDetector = new PitchDetector(this.sampleRate, {
-            clarityThreshold: 0.15,
-            medianWindowSize: 2,  // window=2 catches octave errors while preserving ornamental detail
-            bypassSmoothing: false
-        });
-
-        // Accumulate raw live pitch points (fed directly to line renderer, no block segmentation)
+        // Live pitch accumulation
         this.livePitchTrack = [];
 
-        this.onOriginalPitchReady = () => { };
+        // Callback when offline analysis is done
+        this.onOriginalPitchReady = () => {};
     }
 
+    /**
+     * Initialize mic detector with the actual AudioContext sample rate.
+     */
     initMicDetector(sampleRate) {
         this.sampleRate = sampleRate;
-        this.micPitchDetector = new PitchDetector(sampleRate, {
-            clarityThreshold: 0.15,
-            medianWindowSize: 2,
-            bypassSmoothing: false
-        });
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Real-Time Mic Pitch Detection
+    // ═══════════════════════════════════════════════════════════
+
     /**
-     * Detect pitch from mic audio buffer using the high-quality PitchDetector.
-     * Returns frequency if confident, else null.
+     * Detect pitch from a Float32Array buffer (from AudioWorklet or ScriptProcessor).
+     * Returns the detected frequency if confident, else null.
      */
     detectPitch(float32Array) {
-        const result = this.micPitchDetector.processRealtime(float32Array);
-        
-        // Debugging to see what's happening
-        if (!this._debugLogTimer) this._debugLogTimer = 0;
-        const now = performance.now();
-        if (now - this._debugLogTimer > 1000) {
-            console.log(`[Mic Debug] RMS: ${result.rms ? result.rms.toFixed(4) : 0}, Conf: ${result.confident}, Clr: ${result.clarity ? result.clarity.toFixed(2) : 0}, Freq: ${result.frequency}`);
-            this._debugLogTimer = now;
-        }
+        const detector = PitchDetector.forFloat32Array(float32Array.length);
+        const [frequency, clarity] = detector.findPitch(float32Array, this.sampleRate);
 
-        // CRITICAL: Must check confident flag, otherwise background noise creates random fast
-        // pitch spikes, which fragments notes into < 0.02s shards that get filtered out!
-        if (result.confident && result.frequency !== null && result.frequency >= 50 && result.frequency <= 3000) {
-            return result.frequency;
-        }
-        return null;
+        // Apply spec thresholds
+        if (clarity < CLARITY_THRESHOLD) return null;
+        if (frequency < MIN_FREQ || frequency > MAX_FREQ) return null;
+
+        return frequency;
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Live Pitch Accumulation
+    // ═══════════════════════════════════════════════════════════
+
     /**
-     * Accumulate a live pitch sample — raw points feed the line renderer directly.
-     * No block segmentation during real-time input (eliminates latency).
+     * Accumulate a live pitch sample from mic detection.
      */
     addLivePitchSample(time, pitch) {
-        if (pitch === null || pitch === undefined) return;
-        if (pitch < 50 || pitch > 2000) return;
-
+        if (pitch == null) return;
+        if (pitch < MIN_FREQ || pitch > MAX_FREQ) return;
         this.livePitchTrack.push({ time, pitch });
     }
 
     /**
-     * Reset live pitch data (on stop/new track).
+     * Reset live pitch data (on stop / new track).
      */
     resetLivePitch() {
         this.livePitchTrack = [];
-        this.micPitchDetector.reset();
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Offline Singer Pitch Analysis (Part 2 of spec)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Analyse the full vocals AudioBuffer offline.
+     * Slides a 2048-sample window with 512-sample hop across the entire track.
+     * Uses pitchy's PitchDetector.findPitch() for each frame.
+     *
+     * Produces:
+     *   - rawPitch: [{ time, pitch }] — every valid frame
+     *   - noteBlocks: [{ startTime, endTime, avgPitch, points }] — segmented phrases
+     */
     analyzeFullBuffer(audioBuffer) {
-        console.log("Starting offline pitch analysis...");
+        console.log('[PitchProcessor] Starting offline pitch analysis with pitchy...');
 
         const fileSampleRate = audioBuffer.sampleRate;
-
-        this.offlineDetector = YIN({
-            sampleRate: fileSampleRate,
-            threshold: 0.1
-        });
-
-        const channelData = audioBuffer.getChannelData(0);
-        const windowSize = 2048;
-        const stepSize = 512;  // Fine step for capturing vibrato/ornamentations
-        const numFrames = Math.floor((channelData.length - windowSize) / stepSize);
+        const channelData = audioBuffer.getChannelData(0); // mono
+        const numFrames = Math.floor((channelData.length - BUFFER_SIZE) / HOP_SIZE);
 
         const pitchTrack = [];
 
         for (let i = 0; i < numFrames; i++) {
-            const start = i * stepSize;
-            const windowData = channelData.slice(start, start + windowSize);
-            let pitch = this.offlineDetector(windowData);
+            const start = i * HOP_SIZE;
+            const frame = channelData.slice(start, start + BUFFER_SIZE);
 
-            if (pitch && (pitch < 50 || pitch > 2000)) {
-                pitch = null;
-            }
+            const detector = PitchDetector.forFloat32Array(frame.length);
+            const [frequency, clarity] = detector.findPitch(frame, fileSampleRate);
+
+            // Apply spec thresholds
+            if (clarity < CLARITY_THRESHOLD) continue;
+            if (frequency < MIN_FREQ || frequency > MAX_FREQ) continue;
 
             const timeInSeconds = start / fileSampleRate;
-
-            if (pitch) {
-                pitchTrack.push({ time: timeInSeconds, pitch: pitch });
-            }
+            pitchTrack.push({ time: timeInSeconds, pitch: frequency });
         }
 
-        console.log(`Pitch analysis complete. Found ${pitchTrack.length} pitched frames.`);
+        console.log(`[PitchProcessor] Analysis complete. Found ${pitchTrack.length} pitched frames (${numFrames} total)`);
 
+        // Segment into note blocks for canvas rendering
         const noteBlocks = this.segmentIntoNotes(pitchTrack);
-        console.log(`Segmented into ${noteBlocks.length} note blocks.`);
+        console.log(`[PitchProcessor] Segmented into ${noteBlocks.length} note blocks.`);
 
-        this.onOriginalPitchReady({ rawPitch: pitchTrack, noteBlocks: noteBlocks });
+        this.onOriginalPitchReady({ rawPitch: pitchTrack, noteBlocks });
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Note Segmentation
+    // ═══════════════════════════════════════════════════════════
 
     /**
-     * Compute local pitch variance over a window of points to detect ornamental zones.
+     * Segment raw pitch data into note blocks.
+     * A new note starts when:
+     *   - There's a silence gap > 100ms between frames
+     *   - The pitch jumps more than a threshold in semitones
      */
-    computeLocalVariance(pitchTrack, index, windowSize = 12) {
-        const halfWin = Math.floor(windowSize / 2);
-        const start = Math.max(0, index - halfWin);
-        const end = Math.min(pitchTrack.length, index + halfWin);
-
-        let sum = 0, count = 0;
-        for (let i = start; i < end; i++) {
-            sum += pitchTrack[i].pitch;
-            count++;
-        }
-        const mean = sum / count;
-
-        let variance = 0;
-        for (let i = start; i < end; i++) {
-            const diff = 12 * Math.log2(pitchTrack[i].pitch / mean); // in semitones
-            variance += diff * diff;
-        }
-        return variance / count;
-    }
-
     segmentIntoNotes(pitchTrack) {
         if (pitchTrack.length === 0) return [];
 
-        const SILENCE_GAP = 0.10;
-        // Adaptive thresholds
-        const ORNAMENTAL_SEMITONE_THRESHOLD = 1.0;
-        const SUSTAINED_SEMITONE_THRESHOLD = 2.5;
-        const ORNAMENTAL_VARIANCE_THRESHOLD = 0.5; // variance in semitones² to classify as ornamental zone
+        const SILENCE_GAP = 0.10; // seconds
+        const SEMITONE_THRESHOLD = 2.0; // semitones for breaking
 
         const notes = [];
         let currentNote = {
@@ -164,12 +163,8 @@ export class PitchProcessor {
             const semitones = Math.abs(12 * Math.log2(pt.pitch / avgPitch));
             const timeGap = pt.time - prevPt.time;
 
-            // Adaptive threshold: use local variance to decide
-            const localVar = this.computeLocalVariance(pitchTrack, i);
-            const isOrnamentalZone = localVar > ORNAMENTAL_VARIANCE_THRESHOLD;
-            const threshold = isOrnamentalZone ? ORNAMENTAL_SEMITONE_THRESHOLD : SUSTAINED_SEMITONE_THRESHOLD;
-
-            if (timeGap > SILENCE_GAP || semitones > threshold) {
+            if (timeGap > SILENCE_GAP || semitones > SEMITONE_THRESHOLD) {
+                // Close current note
                 notes.push({
                     startTime: currentNote.startTime,
                     endTime: currentNote.endTime,
@@ -177,6 +172,7 @@ export class PitchProcessor {
                     points: currentNote.points
                 });
 
+                // Start new note
                 currentNote = {
                     startTime: pt.time,
                     endTime: pt.time,
@@ -192,6 +188,7 @@ export class PitchProcessor {
             }
         }
 
+        // Push final note
         notes.push({
             startTime: currentNote.startTime,
             endTime: currentNote.endTime,
@@ -199,46 +196,36 @@ export class PitchProcessor {
             points: currentNote.points
         });
 
-        // Post-process: detect glides and ornamental blocks
-        const processedNotes = notes
-            .filter(n => (n.endTime - n.startTime) >= 0.02)
-            .map(note => {
-                // Compute pitch std deviation for ornamental detection
-                const pitches = note.points.map(p => p.pitch);
-                const mean = pitches.reduce((a, b) => a + b, 0) / pitches.length;
-                const stdDev = Math.sqrt(
-                    pitches.reduce((sum, p) => sum + Math.pow(12 * Math.log2(p / mean), 2), 0) / pitches.length
-                );
+        // Filter out very short fragments (< 20ms)
+        return notes.filter(n => (n.endTime - n.startTime) >= 0.02);
+    }
 
-                // Detect glide (monotonic pitch change over ≥5 consecutive frames)
-                let isGlide = false;
-                if (note.points.length >= 5) {
-                    let increasing = 0, decreasing = 0;
-                    for (let i = 1; i < note.points.length; i++) {
-                        if (note.points[i].pitch > note.points[i - 1].pitch) increasing++;
-                        else if (note.points[i].pitch < note.points[i - 1].pitch) decreasing++;
-                    }
-                    const total = note.points.length - 1;
-                    // If 80%+ of transitions go in one direction, it's a glide (meend)
-                    if (increasing / total >= 0.8 || decreasing / total >= 0.8) {
-                        const totalSemitones = Math.abs(12 * Math.log2(
-                            note.points[note.points.length - 1].pitch / note.points[0].pitch
-                        ));
-                        // Only flag as glide if it spans at least 1.5 semitones
-                        if (totalSemitones >= 1.5) {
-                            isGlide = true;
-                        }
-                    }
-                }
+    // ═══════════════════════════════════════════════════════════
+    //  Frequency → Canvas Helpers (spec mapping)
+    // ═══════════════════════════════════════════════════════════
 
-                return {
-                    ...note,
-                    isOrnamental: stdDev > 0.3,  // high internal variance = ornamental
-                    isGlide: isGlide,
-                    stdDev: stdDev
-                };
-            });
+    /**
+     * Convert frequency (Hz) to MIDI note number.
+     * Formula: midiNote = 12 * log2(frequency / 440) + 69
+     */
+    static freqToMidi(freq) {
+        return 12 * Math.log2(freq / 440) + 69;
+    }
 
-        return processedNotes;
+    /**
+     * Convert MIDI note to Y position on canvas.
+     * C4 (MIDI 60) at bottom, C5 (MIDI 72) at top.
+     */
+    static midiToCanvasY(midiNote, canvasHeight) {
+        const clamped = Math.max(60, Math.min(72, midiNote));
+        return canvasHeight - ((clamped - 60) / 12) * canvasHeight;
+    }
+
+    /**
+     * Convert frequency (Hz) directly to canvas Y position.
+     */
+    static freqToCanvasY(freq, canvasHeight) {
+        const midi = PitchProcessor.freqToMidi(freq);
+        return PitchProcessor.midiToCanvasY(midi, canvasHeight);
     }
 }
