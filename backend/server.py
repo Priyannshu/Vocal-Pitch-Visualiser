@@ -71,8 +71,8 @@ def download_audio(url: str, output_dir: str) -> tuple[str, str]:
         'format': 'bestaudio/best',
         'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
         'cookies_from_browser': 'chrome',
-        'quiet': True,
-        'no_warnings': True,
+        'quiet': False,
+        'no_warnings': False,
         'extractor_args': {
             'youtube': {
                 'player_client': ['default', '-android_sdkless'],
@@ -110,7 +110,7 @@ def separate_audio(wav_path: str, output_dir: str) -> tuple[str, str]:
         "-o", output_dir,
         wav_path
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    subprocess.run(cmd, check=True)
 
     song_folder_name = os.path.splitext(os.path.basename(wav_path))[0]
     base_dir = os.path.join(output_dir, "htdemucs", song_folder_name)
@@ -134,7 +134,7 @@ def file_to_base64(path: str) -> str:
 # ── Endpoints ────────────────────────────────────────────────────────────────────
 
 @app.post("/separate-from-url", response_model=SeparateResponse)
-async def separate_from_url(req: SeparateRequest):
+def separate_from_url(req: SeparateRequest):
     """
     Accepts a YouTube URL, downloads the audio, separates vocals and instrumental,
     and returns both as base64-encoded WAV strings.

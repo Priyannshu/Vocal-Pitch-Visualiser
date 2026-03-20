@@ -2,15 +2,20 @@
  * CanvasRenderer — VOCAL Pitch Visualiser
  *
  * Renders the pitch canvas in both Live Recording Mode and Post-Recording
- * Review Mode, following the VOCAL_UI_Specifications exactly.
+ * Review Mode, following the VOCAL_UI_Specifications.
  *
  * Key visual elements:
- *  - Note grid (C4–C5 dashed lines, labels in left margin)
+ *  - Note grid with dashed lines and left-margin labels
  *  - Singer's reference phrases (faint red-tinted rounded zones with white center line)
  *  - Bezier connections between continuous phrases
  *  - User's sung pitch line (smooth orange quadratic bezier)
  *  - Playhead (orange vertical line + dot) in live mode
  *  - Section dividers and full-width layout in review mode
+ *
+ * AUTO-ADAPTIVE PITCH RANGE:
+ *  - Default range: C2 (65 Hz) to C6 (1047 Hz) — 4 octaves
+ *  - When pitch data arrives, range adapts to actual data ± 3 semitone padding
+ *  - Grid labels shown at all semitone lines for visible notes
  */
 
 export class CanvasRenderer {
@@ -18,57 +23,149 @@ export class CanvasRenderer {
         this.canvas = canvasElement;
         this.ctx = this.canvas.getContext('2d');
 
-        // ── Pitch range ─────────────────────────────────────
-        // The spec grid shows C4–C5, but we keep a wider decode range
-        // so out-of-range singing is still visible at the edges.
-        this.minFreq = 261.63;  // C4
-        this.maxFreq = 523.25;  // C5
+        // ── Default pitch range (expanded from C4–C5 to C2–C6) ──
+        this.minFreq = 65.41;    // C2
+        this.maxFreq = 1046.50;  // C6
 
-        // ── Layout margins (spec) ───────────────────────────
-        this.LEFT_MARGIN = 44;   // reserved for note labels
+        // ── Layout margins ──────────────────────────────────
+        this.LEFT_MARGIN = 44;
         this.RIGHT_MARGIN = 12;
         this.TOP_MARGIN = 12;
         this.BOTTOM_MARGIN = 12;
 
-        // ── Grid notes (top to bottom) ──────────────────────
-        this.gridNotes = [
-            { name: 'C5', freq: 523.25 },
-            { name: 'B4', freq: 493.88 },
-            { name: 'A4', freq: 440.00 },
-            { name: 'G4', freq: 392.00 },
-            { name: 'F4', freq: 349.23 },
-            { name: 'E4', freq: 329.63 },
-            { name: 'D4', freq: 293.66 },
-            { name: 'C4', freq: 261.63 },
-        ];
+        // ── All note names and frequencies for grid ─────────
+        this.ALL_NOTES = this._buildNoteTable();
+
+        // ── Currently visible grid notes (rebuilt on range change) ──
+        this.gridNotes = this._computeGridNotes();
 
         // ── Time mapping ────────────────────────────────────
         this.pixelsPerSecond = 150;
 
         // ── Data ────────────────────────────────────────────
-        this.noteBlocks = [];       // [{startTime, endTime, avgPitch, points, isContinuous?}]
-        this.rawPitchData = [];     // [{time, pitch}]
-        this.livePitchData = [];    // [{time, pitch}]
+        this.noteBlocks = [];
+        this.rawPitchData = [];
+        this.livePitchData = [];
 
         // ── Mode ────────────────────────────────────────────
-        this.mode = 'live';         // 'live' | 'review'
-        this.totalDuration = 0;     // set when entering review mode
+        this.mode = 'live';
+        this.totalDuration = 0;
 
         // ── Playback state ──────────────────────────────────
         this.currentTime = 0;
         this.isPlaying = false;
         this.animationFrame = null;
 
-        // ── Section labels (for review mode dividers) ───────
+        // ── Section labels ──────────────────────────────────
         this.sections = ['Verse 1', 'Chorus', 'Verse 2', 'Bridge', 'Outro'];
 
-        // ── Line break gap (ms) — gaps longer than this start new segment
-        this.LINE_BREAK_GAP = 0.12; // 120ms
+        // ── Line break gap ──────────────────────────────────
+        this.LINE_BREAK_GAP = 0.12;
 
         // Bootstrap
         this.resize();
         window.addEventListener('resize', () => this.resize());
         this.loop();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Note Table — all chromatic notes from C1 to C7
+    // ═══════════════════════════════════════════════════════════
+
+    _buildNoteTable() {
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const notes = [];
+
+        // MIDI 24 (C1) to MIDI 96 (C7)
+        for (let midi = 24; midi <= 96; midi++) {
+            const octave = Math.floor((midi - 12) / 12);
+            const noteIndex = midi % 12;
+            const name = noteNames[noteIndex] + octave;
+            const freq = 440 * Math.pow(2, (midi - 69) / 12);
+            notes.push({ midi, name, freq });
+        }
+
+        return notes;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Compute visible grid notes based on current range
+    // ═══════════════════════════════════════════════════════════
+
+    _computeGridNotes() {
+        // Filter notes within the current frequency range
+        const visible = this.ALL_NOTES.filter(
+            n => n.freq >= this.minFreq * 0.95 && n.freq <= this.maxFreq * 1.05
+        );
+
+        // Decide label density based on how many notes are visible
+        const rangeInSemitones = 12 * Math.log2(this.maxFreq / this.minFreq);
+
+        if (rangeInSemitones <= 14) {
+            // Narrow range: show all notes
+            return visible;
+        } else if (rangeInSemitones <= 26) {
+            // Medium range (~2 octaves): show naturals only (no sharps)
+            return visible.filter(n => !n.name.includes('#'));
+        } else {
+            // Wide range (3+ octaves): show only C and key notes (C, E, G, A)
+            return visible.filter(n => {
+                const noteLetter = n.name.replace(/[0-9]/g, '');
+                return ['C', 'E', 'G', 'A'].includes(noteLetter);
+            });
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Auto-Adaptive Range — fit to actual pitch data
+    // ═══════════════════════════════════════════════════════════
+
+    _adaptRangeToData() {
+        // Collect all frequencies from raw pitch data and note blocks
+        const allFreqs = [];
+
+        for (const p of this.rawPitchData) {
+            allFreqs.push(p.pitch);
+        }
+        for (const b of this.noteBlocks) {
+            allFreqs.push(b.avgPitch);
+            if (b.points) {
+                for (const pt of b.points) {
+                    allFreqs.push(pt.pitch);
+                }
+            }
+        }
+
+        if (allFreqs.length === 0) return;
+
+        // Find actual min/max
+        let dataMin = Infinity, dataMax = -Infinity;
+        for (const f of allFreqs) {
+            if (f < dataMin) dataMin = f;
+            if (f > dataMax) dataMax = f;
+        }
+
+        // Add 3 semitones of padding on each side
+        const padSemitones = 3;
+        const paddedMin = dataMin * Math.pow(2, -padSemitones / 12);
+        const paddedMax = dataMax * Math.pow(2, padSemitones / 12);
+
+        // Snap to nearest octave boundary for clean grid lines
+        // but don't exceed our absolute limits
+        this.minFreq = Math.max(32.70, paddedMin);   // C1 floor
+        this.maxFreq = Math.min(2093.00, paddedMax);  // C7 ceiling
+
+        // Ensure at least 1 octave range
+        if (this.maxFreq / this.minFreq < 2) {
+            const center = Math.sqrt(this.minFreq * this.maxFreq);
+            this.minFreq = center / Math.SQRT2;
+            this.maxFreq = center * Math.SQRT2;
+        }
+
+        // Rebuild grid notes for the new range
+        this.gridNotes = this._computeGridNotes();
+
+        console.log(`[Canvas] Adapted range: ${this.minFreq.toFixed(1)} Hz – ${this.maxFreq.toFixed(1)} Hz`);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -101,11 +198,15 @@ export class CanvasRenderer {
         this.rawPitchData = data.rawPitch || [];
         this.noteBlocks = data.noteBlocks || [];
         this.livePitchData = [];
+
+        // Auto-adapt canvas range to the actual pitch data
+        this._adaptRangeToData();
+
         this.draw();
     }
 
     addLivePitch(pitch) {
-        if (pitch == null || pitch < 50 || pitch > 2000) return;
+        if (pitch == null || pitch < 30 || pitch > 3000) return;
         this.livePitchData.push({ time: this.currentTime, pitch });
     }
 
@@ -147,19 +248,17 @@ export class CanvasRenderer {
 
     /** Map time → x position (live scrolling mode) */
     timeToXLive(t) {
-        // Playhead sits at 20% of plot width
         const playheadX = this.plotLeft + this.plotWidth * 0.2;
         return playheadX + (t - this.currentTime) * this.pixelsPerSecond;
     }
 
-    /** Map time → x position (review mode — full duration across canvas) */
+    /** Map time → x position (review mode) */
     timeToXReview(t) {
         if (this.totalDuration <= 0) return this.plotLeft;
         const ratio = t / this.totalDuration;
         return this.plotLeft + ratio * this.plotWidth;
     }
 
-    /** Current time→x mapper depending on mode */
     timeToX(t) {
         return this.mode === 'review' ? this.timeToXReview(t) : this.timeToXLive(t);
     }
@@ -185,24 +284,16 @@ export class CanvasRenderer {
 
         ctx.clearRect(0, 0, W, H);
 
-        // 1. Note grid
         this.drawNoteGrid();
 
-        // 2. Section dividers (review mode only)
         if (this.mode === 'review') {
             this.drawSectionDividers();
         }
 
-        // 3. Singer's reference phrases
         this.drawReferencePhrases();
-
-        // 4. Connections between continuous reference phrases
         this.drawPhraseConnections();
-
-        // 5. User pitch line (orange)
         this.drawUserPitchLine();
 
-        // 6. Playhead (live mode only)
         if (this.mode === 'live') {
             this.drawPlayhead();
         }
@@ -222,14 +313,16 @@ export class CanvasRenderer {
             ctx.beginPath();
             ctx.setLineDash([3, 6]);
             ctx.lineWidth = 0.5;
-            ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+            // Octave C notes get a slightly brighter line
+            const isOctaveC = note.name.startsWith('C') && !note.name.includes('#');
+            ctx.strokeStyle = isOctaveC ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.035)';
             ctx.moveTo(this.plotLeft, y);
             ctx.lineTo(this.plotRight, y);
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Note label (left margin, right-aligned)
-            ctx.fillStyle = 'rgba(255,255,255,0.22)';
+            // Note label
+            ctx.fillStyle = isOctaveC ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.18)';
             ctx.font = '10px Inter, system-ui, sans-serif';
             ctx.textAlign = 'right';
             ctx.textBaseline = 'middle';
@@ -267,16 +360,15 @@ export class CanvasRenderer {
             const x1 = this.timeToX(block.startTime);
             const x2 = this.timeToX(block.endTime);
 
-            // Skip if off-screen
             if (x2 < this.plotLeft - 10 || x1 > this.plotRight + 10) continue;
 
             const centerY = this.freqToY(block.avgPitch);
-            const halfH = this.plotHeight * 0.055; // 5.5% of plot height
+            const halfH = this.plotHeight * 0.04; // slightly narrower zones
             const top = centerY - halfH;
             const width = Math.max(x2 - x1, 2);
             const height = halfH * 2;
 
-            // Zone fill (very faint red tint)
+            // Zone fill
             ctx.fillStyle = 'rgba(239,68,68,0.06)';
             this.roundRect(ctx, x1, top, width, height, 3);
             ctx.fill();
@@ -287,14 +379,64 @@ export class CanvasRenderer {
             this.roundRect(ctx, x1, top, width, height, 3);
             ctx.stroke();
 
-            // Center pitch line (solid white)
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(255,255,255,0.70)';
-            ctx.lineWidth = 1.5;
-            ctx.moveTo(x1, centerY);
-            ctx.lineTo(x1 + width, centerY);
-            ctx.stroke();
+            // Draw the actual pitch contour within this block (shows vibrato/meend)
+            if (block.points && block.points.length >= 2) {
+                this._drawPhraseContour(block.points);
+            } else {
+                // Fallback: straight center line
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(255,255,255,0.70)';
+                ctx.lineWidth = 1.5;
+                ctx.moveTo(x1, centerY);
+                ctx.lineTo(x1 + width, centerY);
+                ctx.stroke();
+            }
         }
+    }
+
+    /**
+     * Draw the actual pitch contour within a phrase block.
+     * This is what makes vibrato, meend, and harkat visible —
+     * instead of a flat center line, we draw the real frequency curve.
+     */
+    _drawPhraseContour(points) {
+        const ctx = this.ctx;
+
+        const pts = points.map(p => ({
+            x: this.timeToX(p.time),
+            y: this.freqToY(p.pitch)
+        }));
+
+        // Skip off-screen
+        if (pts[pts.length - 1].x < this.plotLeft - 50 || pts[0].x > this.plotRight + 50) return;
+
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        ctx.moveTo(pts[0].x, pts[0].y);
+
+        if (pts.length === 2) {
+            ctx.lineTo(pts[1].x, pts[1].y);
+        } else {
+            // Smooth quadratic bezier through midpoints
+            for (let i = 0; i < pts.length - 1; i++) {
+                const midX = (pts[i].x + pts[i + 1].x) / 2;
+                const midY = (pts[i].y + pts[i + 1].y) / 2;
+                if (i === 0) {
+                    ctx.lineTo(midX, midY);
+                } else {
+                    ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+                }
+            }
+            const last = pts[pts.length - 1];
+            const secondLast = pts[pts.length - 2];
+            ctx.quadraticCurveTo(secondLast.x, secondLast.y, last.x, last.y);
+        }
+
+        ctx.stroke();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -303,14 +445,13 @@ export class CanvasRenderer {
 
     drawPhraseConnections() {
         const ctx = this.ctx;
-        const MAX_GAP = 0.12; // seconds — treat as continuous if gap ≤ this
+        const MAX_GAP = 0.12;
 
         for (let i = 0; i < this.noteBlocks.length - 1; i++) {
             const curr = this.noteBlocks[i];
             const next = this.noteBlocks[i + 1];
             const gap = next.startTime - curr.endTime;
 
-            // Only connect if no breath gap
             if (gap > MAX_GAP) continue;
 
             const x1 = this.timeToX(curr.endTime);
@@ -318,11 +459,9 @@ export class CanvasRenderer {
             const x2 = this.timeToX(next.startTime);
             const y2 = this.freqToY(next.avgPitch);
 
-            // Skip if off-screen
             if (x1 > this.plotRight + 10 && x2 > this.plotRight + 10) continue;
             if (x1 < this.plotLeft - 10 && x2 < this.plotLeft - 10) continue;
 
-            // Solid bezier S-curve
             const midX = (x1 + x2) / 2;
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255,255,255,0.20)';
@@ -343,7 +482,6 @@ export class CanvasRenderer {
 
         const ctx = this.ctx;
 
-        // Split into segments on time gaps > LINE_BREAK_GAP
         const segments = [];
         let seg = [data[0]];
 
@@ -357,7 +495,6 @@ export class CanvasRenderer {
         }
         if (seg.length >= 2) segments.push(seg);
 
-        // Style: smooth orange line, no dots
         ctx.save();
         ctx.strokeStyle = '#f97316';
         ctx.lineWidth = 2;
@@ -365,13 +502,11 @@ export class CanvasRenderer {
         ctx.lineCap = 'round';
 
         for (const segment of segments) {
-            // Convert to screen coords
             const pts = segment.map(p => ({
                 x: this.timeToX(p.time),
                 y: this.freqToY(p.pitch)
             }));
 
-            // Skip off-screen segments
             const minX = pts[0].x;
             const maxX = pts[pts.length - 1].x;
             if (maxX < this.plotLeft - 50 || minX > this.plotRight + 50) continue;
@@ -382,7 +517,6 @@ export class CanvasRenderer {
             if (pts.length === 2) {
                 ctx.lineTo(pts[1].x, pts[1].y);
             } else {
-                // Quadratic bezier midpoint interpolation for smooth curves
                 for (let i = 0; i < pts.length - 1; i++) {
                     const midX = (pts[i].x + pts[i + 1].x) / 2;
                     const midY = (pts[i].y + pts[i + 1].y) / 2;
@@ -392,7 +526,6 @@ export class CanvasRenderer {
                         ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
                     }
                 }
-                // Final point
                 const last = pts[pts.length - 1];
                 const secondLast = pts[pts.length - 2];
                 ctx.quadraticCurveTo(secondLast.x, secondLast.y, last.x, last.y);
@@ -412,7 +545,6 @@ export class CanvasRenderer {
         const ctx = this.ctx;
         const x = this.plotLeft + this.plotWidth * 0.2;
 
-        // Vertical line
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(249,115,22,0.45)';
         ctx.lineWidth = 1;
@@ -420,7 +552,6 @@ export class CanvasRenderer {
         ctx.lineTo(x, this.plotBottom);
         ctx.stroke();
 
-        // Dot at the top
         ctx.beginPath();
         ctx.fillStyle = '#f97316';
         ctx.arc(x, this.plotTop, 3, 0, Math.PI * 2);
